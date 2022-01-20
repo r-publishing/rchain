@@ -161,11 +161,8 @@ object FunctionsSetup {
       // Reporting runtime
       reportingRuntime <- {
         implicit val (bs, bd, sp) = (blockStore, blockDagStorage, span)
-        if (conf.apiServer.enableReporting) {
-          // In reporting replay channels map is not needed
-          rnodeStoreManager.rSpaceStores(useChannelsMap = false).map(ReportingCasper.rhoReporter(_))
-        } else
-          ReportingCasper.noop.pure[F]
+        // reporting is needed anyway. So keep the reporting enable by default.
+        rnodeStoreManager.rSpaceStores(useChannelsMap = false).map(ReportingCasper.rhoReporter(_))
       }
 
       // RNodeStateManager
