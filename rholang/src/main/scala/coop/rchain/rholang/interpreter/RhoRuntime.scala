@@ -410,6 +410,17 @@ object RhoRuntime {
     )
   )
 
+  def stdRhoParserProcesses[F[_]]: Seq[Definition[F]] = Seq(
+    Definition[F](
+      "rho:parser:parse",
+      FixedChannels.RHO_PARSER,
+      6,
+      BodyRefs.RHO_PARSER, { ctx =>
+        ctx.systemProcesses.rhoParser
+      }
+    )
+  )
+
   def dispatchTableCreator[F[_]: Concurrent: Span](
       space: RhoTuplespace[F],
       dispatcher: RhoDispatch[F],
@@ -417,7 +428,7 @@ object RhoRuntime {
       invalidBlocks: InvalidBlocks[F],
       extraSystemProcesses: Seq[Definition[F]]
   ): RhoDispatchMap[F] =
-    (stdSystemProcesses[F] ++ stdRhoCryptoProcesses[F] ++ extraSystemProcesses)
+    (stdSystemProcesses[F] ++ stdRhoCryptoProcesses[F] ++ stdRhoParserProcesses[F] ++ extraSystemProcesses)
       .map(
         _.toDispatchTable(
           ProcessContext(space, dispatcher, blockData, invalidBlocks)
@@ -471,9 +482,11 @@ object RhoRuntime {
     for {
       blockDataRef  <- Ref.of(BlockData.empty)
       invalidBlocks = InvalidBlocks.unsafe[F]()
-      urnMap = basicProcesses ++ (stdSystemProcesses[F] ++ stdRhoCryptoProcesses[F] ++ extraSystemProcesses)
+      urnMap = basicProcesses ++ (stdSystemProcesses[F] ++ stdRhoCryptoProcesses[F] ++ stdRhoParserProcesses[
+        F
+      ] ++ extraSystemProcesses)
         .map(_.toUrnMap)
-      procDefs = (stdSystemProcesses[F] ++ stdRhoCryptoProcesses[F] ++ extraSystemProcesses)
+      procDefs = (stdSystemProcesses[F] ++ stdRhoCryptoProcesses[F] ++ stdRhoParserProcesses[F] ++ extraSystemProcesses)
         .map(_.toProcDefs)
     } yield (blockDataRef, invalidBlocks, urnMap, procDefs)
 

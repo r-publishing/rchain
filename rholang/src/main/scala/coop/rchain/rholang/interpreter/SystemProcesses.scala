@@ -19,6 +19,8 @@ import coop.rchain.rholang.interpreter.util.RevAddress
 import coop.rchain.rspace.{ContResult, Result}
 import coop.rchain.shared.Base16
 
+import coop.rchain.rholang.interpreter.compiler.Compiler
+import coop.rchain.rholang.interpreter.errors.InterpreterError
 import scala.util.Try
 
 //TODO: Make each of the system processes into a case class,
@@ -42,6 +44,7 @@ trait SystemProcesses[F[_]] {
   def deployerIdOps: Contract[F]
   def registryOps: Contract[F]
   def sysAuthTokenOps: Contract[F]
+  def rhoParser: Contract[F]
 }
 
 object SystemProcesses {
@@ -94,6 +97,7 @@ object SystemProcesses {
     val REG_INSERT_SIGNED: Par  = byteName(16)
     val REG_OPS: Par            = byteName(17)
     val SYS_AUTHTOKEN_OPS: Par  = byteName(18)
+    val RHO_PARSER: Par         = byteName(19)
   }
   object BodyRefs {
     val STDOUT: Long             = 0L
@@ -111,6 +115,7 @@ object SystemProcesses {
     val DEPLOYER_ID_OPS: Long    = 14L
     val REG_OPS: Long            = 15L
     val SYS_AUTHTOKEN_OPS: Long  = 16L
+    val RHO_PARSER: Long         = 17L
   }
   final case class ProcessContext[F[_]: Concurrent: Span](
       space: RhoTuplespace[F],
@@ -158,6 +163,7 @@ object SystemProcesses {
       space: RhoTuplespace[F]
   )(implicit F: Concurrent[F], spanF: Span[F]): SystemProcesses[F] =
     new SystemProcesses[F] {
+      case class ParserError(parseError: InterpreterError) extends Throwable
 
       type ContWithMetaData = ContResult[Par, BindPattern, TaggedContinuation]
 
@@ -346,6 +352,54 @@ object SystemProcesses {
             case _                       => RhoType.Boolean(false)
           }
           produce(Seq(response), ack)
+      }
+
+      def rhoParser: Contract[F] = {
+        case isContractCall(
+            produce,
+            Seq(version, argument, expression, arguments, ack1, ack2)
+            ) =>
+          val response: F[Unit] = Seq(version, argument, expression, arguments) match {
+            case Seq(
+                RhoType.String(_),
+                RhoType.String(_),
+                Par(_, _, _, _, _, _, _, _, _, _),
+                _
+                ) => {
+
+              val env: Map[String, Par] = Map[String, Par](
+                "args" -> arguments
+              )
+
+              val code: String = RhoType.String.unapply(argument) match {
+                case Some(s) => s
+                case None    => "{}"
+              }
+
+              for {
+                parsed <- Compiler[F]
+                           .sourceToADT(code, env)
+                           .handleErrorWith {
+                             case err: InterpreterError =>
+                               ParserError(err).raiseError[F, Par]
+                           }
+
+                pretty1 = RhoType.String(prettyPrinter.buildString(parsed))
+                pretty2 = RhoType.String(prettyPrinter.buildString(expression))
+
+                _ <- produce(Seq(RhoType.Boolean(pretty1 == pretty2)), ack1)
+                _ <- produce(Seq(parsed), ack2)
+              } yield ()
+
+            }
+            case _ => {
+              for {
+                _ <- produce(Seq(RhoType.Boolean(false)), ack1)
+                _ <- produce(Seq(Par()), ack2)
+              } yield ()
+            }
+          }
+          response
       }
 
       def secp256k1Verify: Contract[F] =
